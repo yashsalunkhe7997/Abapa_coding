@@ -1,0 +1,570 @@
+*&---------------------------------------------------------------------*
+*& Report  ZVP_TASK1
+*&
+*&---------------------------------------------------------------------*
+*&
+*&
+*&---------------------------------------------------------------------*
+
+REPORT ZVP_TASK1.
+
+
+TYPES: BEGIN OF ty_data,
+         filedata(1000) TYPE c,
+       END OF ty_data.
+
+"=================== source variable ==========================================================="
+DATA: lv_source(200),
+      lv_line TYPE string,
+      lv_separator TYPE c VALUE ','.
+"============================== source variable ================================================"
+
+DATA: wa_data TYPE yashtab.
+
+DATA: filetable LIKE sdokpath OCCURS 0 WITH HEADER LINE,
+      filetable1 LIKE sdokpath OCCURS 0 WITH HEADER LINE,
+      dirtable LIKE sdokpath OCCURS 0 WITH HEADER LINE,
+      wa_files TYPE string.
+
+DATA: it_datatab TYPE TABLE OF ty_data WITH HEADER LINE,
+      wa_datatab TYPE ty_data.
+
+DATA: lv_d1 TYPE string,
+      lv_d2 TYPE string,
+      lv_d3 TYPE string,
+      lv_d4 TYPE string,
+      lv_d5 TYPE string,
+      lv_d6 TYPE string,
+      lv_d7 TYPE string,
+      lv_d8 TYPE string,
+      lv_d9 TYPE string,
+      lv_d10 TYPE string,
+      lv_d11 TYPE string,
+      lv_d12 TYPE string,
+      lv_d13 TYPE string,
+      lv_d14 TYPE string,
+      lv_d15 TYPE string,
+      lv_d16 TYPE string.
+
+"========================== Pop-up variables ==========================================="
+DATA: lv_existing_eft TYPE yashtab-ZUTR_EFT_NO, " Variable to store existing EFT number
+      lv_count TYPE i VALUE 0,    " Counter for successful insertions
+      lv_dup_count TYPE i VALUE 0, " Counter for duplicate records
+      lv_files_read TYPE i VALUE 0. " Counter for files successfully read
+
+DATA: lv1_file TYPE string.
+
+DATA : lv_out_folder TYPE string,
+       lv_full_dest_folder TYPE string.
+
+DATA: lv_al11_success TYPE i VALUE 0. " Flag to track successful writes
+
+"==============================================================================================="
+
+DATA: lv_backup_file TYPE RLGRAP-FILENAME.
+DATA : copy_file TYPE RLGRAP-FILENAME.
+DATA: lv_backup_folder TYPE string .  " Destination for backup
+
+DATA: lv_files_moved TYPE i VALUE 0. " Counter for successfully moved files.
+
+DATA : delete_file TYPE RLGRAP-FILENAME.
+"==============================================================================================="
+
+DATA: IT_DATA789 TYPE TABLE OF YASHTAB  WITH HEADER LINE.
+DATA: it_fieldcat TYPE SLIS_T_FIELDCAT_ALV,
+      wa_fieldcat TYPE SLIS_FIELDCAT_ALV.
+
+"==============================================================================================="
+
+START-OF-SELECTION.
+
+SELECT SINGLE remarks FROM ZPATH_MAINTAIN INTO lv_source WHERE KEYREF = 'LOCAL_PATH'.
+SELECT SINGLE remarks FROM ZPATH_MAINTAIN INTO lv_out_folder WHERE KEYREF = 'OUTPUT_PATH'.
+SELECT SINGLE remarks FROM ZPATH_MAINTAIN INTO lv_backup_folder WHERE KEYREF = 'DESK_PATH'.
+
+CALL FUNCTION 'TMP_GUI_DIRECTORY_LIST_FILES'
+    EXPORTING
+      DIRECTORY = lv_source
+    TABLES
+      FILE_TABLE = filetable
+      DIR_TABLE  = dirtable.
+
+IF filetable[] IS INITIAL.
+  MESSAGE 'No files found in the folder.' TYPE 'I'.
+  EXIT.
+ENDIF.
+
+LOOP AT filetable INTO wa_files.
+  IF wa_files CS '.csv' OR wa_files CS '.CSV'.
+    APPEND wa_files TO filetable1.
+  ENDIF.
+ENDLOOP.
+
+IF filetable1[] IS INITIAL.
+  MESSAGE 'No CSV files found in the folder.' TYPE 'I'.
+  EXIT.
+ENDIF.
+
+LOOP AT filetable1 INTO wa_files.
+  CONCATENATE lv_source wa_files INTO lv1_file.
+  CLEAR it_datatab.
+
+  CALL FUNCTION 'GUI_UPLOAD'
+    EXPORTING
+      FILENAME = lv1_file
+      FILETYPE = 'ASC'
+    TABLES
+      DATA_TAB = it_datatab
+    EXCEPTIONS
+      FILE_OPEN_ERROR = 1
+      FILE_READ_ERROR = 2
+      OTHERS = 3.
+
+  IF sy-subrc <> 0.
+    MESSAGE |Error reading file { lv1_file }| TYPE 'I'.
+    CONTINUE.
+  ENDIF.
+
+  IF it_datatab[] IS INITIAL.
+    MESSAGE |File { lv1_file } is empty.| TYPE 'I'.
+    CONTINUE.
+  ENDIF.
+
+  lv_files_read = lv_files_read + 1.
+
+  " **Check if first row is header before deleting**
+  READ TABLE it_datatab INDEX 1 INTO wa_datatab.
+  IF sy-subrc = 0 AND wa_datatab-filedata CS 'EFT_NO'.
+    DELETE it_datatab INDEX 1.
+  ENDIF.
+
+  LOOP AT it_datatab INTO wa_datatab.
+    lv_line = wa_datatab-filedata.
+
+    " **Using Your Splitting Method**
+    CLEAR: lv_d1, lv_d2, lv_d3, lv_d4, lv_d5, lv_d6, lv_d7, lv_d8,
+           lv_d9, lv_d10, lv_d11, lv_d12, lv_d13, lv_d14, lv_d15, lv_d16.
+
+    SPLIT lv_line AT lv_separator INTO lv_d1 lv_d2 lv_d3 lv_d4 lv_d5 lv_d6 lv_d7 lv_d8
+                                       lv_d9 lv_d10 lv_d11 lv_d12 lv_d13 lv_d14 lv_d15 lv_d16.
+
+    wa_data-ZRUN_DATE  = lv_d1.
+    wa_data-ZIDENT = lv_d2.
+    wa_data-ZCLIENTCODE = lv_d3.
+    wa_data-ZACC_NO_ = lv_d4.
+    wa_data-ZUSER_ID = lv_d5.
+    wa_data-ZVENDOR = lv_d6.
+    wa_data-ZDOCNO  = lv_d7.
+    wa_data-ZVALDAT = lv_d8.
+    wa_data-ZBANKREF = lv_d9.
+    wa_data-ZCHECKNO = lv_d10.
+    wa_data-ZDDNO  = lv_d11.
+    wa_data-ZAMOUNT  = lv_d12.
+    wa_data-ZSTATUS  = lv_d13.
+    wa_data-ZUTR_EFT_NO = lv_d14.
+    wa_data-ZREJRSN = lv_d15.
+    wa_data-ZFILE_NAME = wa_files.
+
+
+     " Skip if all fields are empty (empty record)
+  IF lv_d1 IS INITIAL AND lv_d2 IS INITIAL AND lv_d3 IS INITIAL AND lv_d4 IS INITIAL AND
+     lv_d5 IS INITIAL AND lv_d6 IS INITIAL AND lv_d7 IS INITIAL AND lv_d8 IS INITIAL AND
+     lv_d9 IS INITIAL AND lv_d10 IS INITIAL AND lv_d11 IS INITIAL AND lv_d12 IS INITIAL AND
+     lv_d13 IS INITIAL AND lv_d14 IS INITIAL AND lv_d15 IS INITIAL AND lv_d16 IS INITIAL.
+    CONTINUE. " Skip empty records
+  ENDIF.
+
+" ✅ If UTR is missing, insert without checking duplicates
+  IF wa_data-ZUTR_EFT_NO IS INITIAL.
+    INSERT yashtab FROM wa_data.
+    IF sy-subrc = 0.
+      lv_count = lv_count + 1.
+    ENDIF.
+    CONTINUE. " Move to next loop
+  ENDIF.
+
+  " ✅ Check for duplicates (only if UTR exists)
+  SELECT SINGLE ZUTR_EFT_NO INTO lv_existing_eft
+    FROM yashtab
+    WHERE ZUTR_EFT_NO = wa_data-ZUTR_EFT_NO.
+
+  IF sy-subrc = 0.
+    lv_dup_count = lv_dup_count + 1.
+    CONTINUE.
+  ENDIF.
+
+  " ✅ Insert unique record
+  INSERT yashtab FROM wa_data.
+  IF sy-subrc = 0.
+    lv_count = lv_count + 1.
+  ENDIF.
+
+
+    CLEAR wa_data.
+  ENDLOOP.
+
+  " **Ensure only unique records in AL11**
+  DELETE ADJACENT DUPLICATES FROM it_datatab COMPARING filedata.
+
+  CONCATENATE lv_out_folder wa_files INTO lv_full_dest_folder.
+
+  OPEN DATASET lv_full_dest_folder FOR OUTPUT IN TEXT MODE ENCODING DEFAULT.
+
+  LOOP AT it_datatab INTO wa_datatab.
+    TRANSFER wa_datatab TO lv_full_dest_folder.
+    IF sy-subrc <> 0.
+      WRITE: / '❌ Failed to Write Line:'.
+    ENDIF.
+  ENDLOOP.
+
+  CLOSE DATASET lv_full_dest_folder.
+
+  IF sy-subrc = 0.
+    lv_al11_success = 1.
+  ENDIF.
+ENDLOOP.
+
+" **Move processed files to backup** "
+LOOP AT filetable1 INTO wa_files.
+
+  CONCATENATE lv_source wa_files INTO copy_file.
+  CONCATENATE lv_backup_folder wa_files INTO lv_backup_file.
+
+  CALL FUNCTION 'WS_FILE_COPY'
+    EXPORTING
+      SOURCE      = copy_file
+      DESTINATION = lv_backup_file
+    EXCEPTIONS
+      OTHERS      = 1.
+
+  IF sy-subrc = 0.
+    lv_files_moved = lv_files_moved + 1.
+    CALL FUNCTION 'WS_FILE_DELETE'
+      EXPORTING
+        FILE = copy_file.
+  ENDIF.
+ENDLOOP.
+
+" **Pop-up messages at key steps** "
+MESSAGE |{ lv_files_read } files read successfully!| TYPE 'I'.
+MESSAGE |{ lv_count } records inserted successfully!| TYPE 'I'.
+MESSAGE |{ lv_dup_count } duplicate records found and skipped.| TYPE 'I'.
+MESSAGE |{ lv_files_moved } files moved to backup folder.| TYPE 'I'.
+
+
+
+START-OF-SELECTION.
+
+*Fetch data from the database
+  SELECT * FROM YASHTAB INTO TABLE IT_DATA789 .
+*Build field catalog
+  wa_fieldcat-fieldname  = 'ZRUN_DATE'.    " Fieldname in the    data table
+  wa_fieldcat-seltext_m  = 'ZRUN_DATE'.   " Column description in the output
+  APPEND wa_fieldcat TO it_fieldcat.
+*
+  wa_fieldcat-fieldname  = 'ZIDENT'.
+  wa_fieldcat-seltext_m  = 'EMP_FNAME .'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZCLIENTCODE'.
+  wa_fieldcat-seltext_m  = 'ZCLIENTCODE'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+
+  wa_fieldcat-fieldname  = 'ZACC_NO_'.
+  wa_fieldcat-seltext_m  = 'ZACC_NO_'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZUSER_ID'.
+  wa_fieldcat-seltext_m  = 'ZUSER_ID'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZVENDOR'.
+  wa_fieldcat-seltext_m  = 'ZVENDOR'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZDOCNO'.
+  wa_fieldcat-seltext_m  = 'ZDOCNO'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZVALDAT'.
+  wa_fieldcat-seltext_m  = 'ZVALDAT'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZBANKREF'.
+  wa_fieldcat-seltext_m  = 'ZBANKREF'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZCHECKNO'.
+  wa_fieldcat-seltext_m  = 'ZCHECKNO'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZDDNO'.
+  wa_fieldcat-seltext_m  = 'ZDDNO'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZAMOUNT'.
+  wa_fieldcat-seltext_m  = 'ZAMOUNT'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+
+  wa_fieldcat-fieldname  = 'ZSTATUS'.
+  wa_fieldcat-seltext_m  = 'ZSTATUS'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZUTR_EFT_NO'.
+  wa_fieldcat-seltext_m  = 'ZUTR_EFT_NO'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  wa_fieldcat-fieldname  = 'ZREJRSN'.
+  wa_fieldcat-seltext_m  = 'ZREJRSN'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+
+  wa_fieldcat-fieldname  = 'ZFILE_NAME'.
+  wa_fieldcat-seltext_m  = 'ZFILE_NAME'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+
+
+*Pass data and field catalog to ALV function module to display ALV list
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      it_fieldcat   = it_fieldcat
+    TABLES
+      t_outtab      = IT_DATA789
+    EXCEPTIONS
+      program_error = 1
+      OTHERS        = 2.
+
+
+=========================================================================================================================================
+
+automation using the OOPs concept 
+
+
+CLASS lcl_file_processor DEFINITION.
+  PUBLIC SECTION.
+    METHODS: process_files,
+             display_results.
+
+  PRIVATE SECTION.
+    TYPES: BEGIN OF ty_data,
+             filedata(1000) TYPE c,
+           END OF ty_data.
+
+    DATA: lv_source        TYPE string,
+          lv_out_folder    TYPE string,
+          lv_backup_folder TYPE string,
+          lv_line          TYPE string,
+          lv_separator     TYPE c VALUE ',',
+          wa_data          TYPE yashtab,
+          it_datatab       TYPE TABLE OF ty_data,
+          wa_datatab       TYPE ty_data,
+          filetable        TYPE STANDARD TABLE OF sdokpath WITH HEADER LINE,
+          filetable1       TYPE STANDARD TABLE OF sdokpath WITH HEADER LINE,
+          dirtable         TYPE STANDARD TABLE OF sdokpath WITH HEADER LINE,
+          lv_files_read    TYPE i VALUE 0,
+          lv_count         TYPE i VALUE 0,
+          lv_dup_count     TYPE i VALUE 0,
+          lv_files_moved   TYPE i VALUE 0,
+          lv_al11_success  TYPE i VALUE 0,
+          lv_existing_eft  TYPE yashtab-zutr_eft_no,
+          lv1_file         TYPE string,
+          lv_full_dest_folder TYPE string,
+          lv_backup_file   TYPE rlgrap-filename,
+          copy_file        TYPE rlgrap-filename,
+          delete_file      TYPE rlgrap-filename.
+
+    METHODS: fetch_paths,
+             list_files,
+             read_file IMPORTING iv_file TYPE string,
+             parse_line IMPORTING iv_line TYPE string,
+             write_to_db,
+             write_to_al11,
+             move_to_backup,
+             show_popups,
+             is_duplicate RETURNING VALUE(rv_result) TYPE abap_bool.
+ENDCLASS.
+
+CLASS lcl_file_processor IMPLEMENTATION.
+  METHOD fetch_paths.
+    SELECT SINGLE remarks FROM zpath_maintain INTO lv_source WHERE keyref = 'LOCAL_PATH'.
+    SELECT SINGLE remarks FROM zpath_maintain INTO lv_out_folder WHERE keyref = 'OUTPUT_PATH'.
+    SELECT SINGLE remarks FROM zpath_maintain INTO lv_backup_folder WHERE keyref = 'DESK_PATH'.
+  ENDMETHOD.
+
+  METHOD list_files.
+    CALL FUNCTION 'TMP_GUI_DIRECTORY_LIST_FILES'
+      EXPORTING
+        directory = lv_source
+      TABLES
+        file_table = filetable
+        dir_table  = dirtable.
+
+    LOOP AT filetable INTO DATA(wa_file).
+      IF wa_file CS '.csv' OR wa_file CS '.CSV'.
+        APPEND wa_file TO filetable1.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD read_file.
+    CLEAR it_datatab.
+    CALL FUNCTION 'GUI_UPLOAD'
+      EXPORTING
+        filename = iv_file
+        filetype = 'ASC'
+      TABLES
+        data_tab = it_datatab.
+
+    IF sy-subrc = 0 AND it_datatab[] IS NOT INITIAL.
+      lv_files_read = lv_files_read + 1.
+
+      READ TABLE it_datatab INDEX 1 INTO wa_datatab.
+      IF wa_datatab-filedata CS 'EFT_NO'.
+        DELETE it_datatab INDEX 1.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD parse_line.
+    DATA: lv_d(16) TYPE string,
+          lv_split TYPE string.
+
+    SPLIT iv_line AT lv_separator INTO
+      DATA(lv_d1) DATA(lv_d2) DATA(lv_d3) DATA(lv_d4)
+      DATA(lv_d5) DATA(lv_d6) DATA(lv_d7) DATA(lv_d8)
+      DATA(lv_d9) DATA(lv_d10) DATA(lv_d11) DATA(lv_d12)
+      DATA(lv_d13) DATA(lv_d14) DATA(lv_d15) DATA(lv_d16).
+
+    wa_data-zrun_date = lv_d1.
+    wa_data-zident = lv_d2.
+    wa_data-zclientcode = lv_d3.
+    wa_data-zacc_no_ = lv_d4.
+    wa_data-zuser_id = lv_d5.
+    wa_data-zvendor = lv_d6.
+    wa_data-zdocno = lv_d7.
+    wa_data-zvaldat = lv_d8.
+    wa_data-zbankref = lv_d9.
+    wa_data-zcheckno = lv_d10.
+    wa_data-zddno = lv_d11.
+    wa_data-zamount = lv_d12.
+    wa_data-zstatus = lv_d13.
+    wa_data-zutr_eft_no = lv_d14.
+    wa_data-zrejrsn = lv_d15.
+    wa_data-zfile_name = iv_file.
+  ENDMETHOD.
+
+  METHOD is_duplicate.
+    SELECT SINGLE zutr_eft_no INTO lv_existing_eft FROM yashtab WHERE zutr_eft_no = wa_data-zutr_eft_no.
+    rv_result = xsdbool( sy-subrc = 0 ).
+  ENDMETHOD.
+
+  METHOD write_to_db.
+    LOOP AT it_datatab INTO wa_datatab.
+      lv_line = wa_datatab-filedata.
+      parse_line( iv_line = lv_line ).
+      IF wa_data-zutr_eft_no IS INITIAL OR is_duplicate( ) = abap_true.
+        ADD 1 TO lv_dup_count.
+        CONTINUE.
+      ENDIF.
+
+      INSERT INTO yashtab VALUES wa_data.
+      IF sy-subrc = 0.
+        ADD 1 TO lv_count.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD write_to_al11.
+    DELETE ADJACENT DUPLICATES FROM it_datatab COMPARING filedata.
+    CONCATENATE lv_out_folder lv1_file INTO lv_full_dest_folder.
+    OPEN DATASET lv_full_dest_folder FOR OUTPUT IN TEXT MODE ENCODING DEFAULT.
+    LOOP AT it_datatab INTO wa_datatab.
+      TRANSFER wa_datatab TO lv_full_dest_folder.
+    ENDLOOP.
+    CLOSE DATASET lv_full_dest_folder.
+  ENDMETHOD.
+
+  METHOD move_to_backup.
+    LOOP AT filetable1 INTO DATA(wa_file).
+      CONCATENATE lv_source wa_file INTO copy_file.
+      CONCATENATE lv_backup_folder wa_file INTO lv_backup_file.
+      CALL FUNCTION 'WS_FILE_COPY'
+        EXPORTING source = copy_file destination = lv_backup_file.
+      IF sy-subrc = 0.
+        ADD 1 TO lv_files_moved.
+        CALL FUNCTION 'WS_FILE_DELETE'
+          EXPORTING file = copy_file.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD show_popups.
+    MESSAGE |{ lv_files_read } files read successfully!| TYPE 'I'.
+    MESSAGE |{ lv_count } records inserted successfully!| TYPE 'I'.
+    MESSAGE |{ lv_dup_count } duplicate records skipped.| TYPE 'I'.
+    MESSAGE |{ lv_files_moved } files moved to backup folder.| TYPE 'I'.
+  ENDMETHOD.
+
+
+========================execution methods=================================================================
+
+  METHOD process_files.
+    fetch_paths( ).
+    list_files( ).
+    LOOP AT filetable1 INTO DATA(wa_file).
+      CONCATENATE lv_source wa_file INTO lv1_file.
+      read_file( iv_file = lv1_file ).
+      write_to_db( ).
+      write_to_al11( ).
+    ENDLOOP.
+    move_to_backup( ).
+    show_popups( ).
+  ENDMETHOD.
+
+  METHOD display_results.
+    DATA: it_data789 TYPE TABLE OF yashtab,
+          wa_fieldcat TYPE lvc_s_fcat,
+          it_fieldcat TYPE lvc_t_fcat.
+
+    SELECT * FROM yashtab INTO TABLE it_data789.
+
+    DEFINE add_field.
+      wa_fieldcat-fieldname = &1.
+      wa_fieldcat-seltext_m = &2.
+      APPEND wa_fieldcat TO it_fieldcat.
+    END-OF-DEFINITION.
+
+    add_field 'ZRUN_DATE'    'ZRUN_DATE'.
+    add_field 'ZIDENT'       'EMP_FNAME'.
+    add_field 'ZCLIENTCODE'  'ZCLIENTCODE'.
+    add_field 'ZACC_NO_'     'ZACC_NO_'.
+    add_field 'ZUSER_ID'     'ZUSER_ID'.
+    add_field 'ZVENDOR'      'ZVENDOR'.
+    add_field 'ZDOCNO'       'ZDOCNO'.
+    add_field 'ZVALDAT'      'ZVALDAT'.
+    add_field 'ZBANKREF'     'ZBANKREF'.
+    add_field 'ZCHECKNO'     'ZCHECKNO'.
+    add_field 'ZDDNO'        'ZDDNO'.
+    add_field 'ZAMOUNT'      'ZAMOUNT'.
+    add_field 'ZSTATUS'      'ZSTATUS'.
+    add_field 'ZUTR_EFT_NO'  'ZUTR_EFT_NO'.
+    add_field 'ZREJRSN'      'ZREJRSN'.
+    add_field 'ZFILE_NAME'   'ZFILE_NAME'.
+
+    CALL FUNCTION 'REUSE_ALV_LIST_DISPLAY'
+      EXPORTING
+        it_fieldcat   = it_fieldcat
+      TABLES
+        t_outtab      = it_data789.
+  ENDMETHOD.
+ENDCLASS.
+
+START-OF-SELECTION.
+  DATA(lo_processor) = NEW lcl_file_processor( ).
+  lo_processor->process_files( ).
+  lo_processor->display_results( ).
+
+
