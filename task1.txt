@@ -568,3 +568,248 @@ START-OF-SELECTION.
   lo_processor->display_results( ).
 
 
+
+
+DIR_ZFUSION	
+
+
+*--- Types & Data Declarations ---*
+TYPES: BEGIN OF ty_alv_display,
+         checkbox          TYPE c LENGTH 1,
+         status(12)        TYPE c,
+         remarks(100)       TYPE c,
+         lifnr             LIKE bseg-lifnr,
+         kunnr             LIKE bseg-kunnr,
+         belnr             LIKE bseg-belnr,
+         transaction_ref_no(15) TYPE c,
+         rwbtr             LIKE bseg-dmbtr,
+         vend_name(140)     TYPE c,
+         vend_code         TYPE lifnr,
+         line_color(4)      TYPE c,
+         pay_type(10)       TYPE c,
+         no_of_invoices    TYPE i,
+         pay_loc(35)       TYPE c,
+         print_loc(35)     TYPE c,
+         fis_yr            LIKE bseg-gjahr,
+         err_type          TYPE i,
+         chk_num           TYPE payr-chect,
+         debit_acc(30)      TYPE c,
+         val_date          TYPE sy-datum,
+         bene_add1(50)      TYPE c,
+         bene_add2(50)      TYPE c,
+         bene_acc(30)      TYPE c,    " Dropdown field
+         bene_ifsc(11)      TYPE c,
+         pin_code(10)       TYPE c,
+       END OF ty_alv_display.
+
+DATA: go_container     TYPE REF TO cl_gui_custom_container,
+      go_alv           TYPE REF TO cl_gui_alv_grid,
+      gt_fcat          TYPE lvc_t_fcat,
+      gs_fcat          TYPE lvc_s_fcat,
+      gt_dropdown_vals TYPE lvc_t_drop,
+      gs_dropdown_val  TYPE lvc_s_drop,
+      gt_alv_display   TYPE STANDARD TABLE OF ty_alv_display,
+      gs_layout        TYPE lvc_s_layo.
+
+*--- Vendor Bank Account Data ---*
+TYPES: BEGIN OF ty_vendor_bank,
+         lifnr  TYPE lifnr,
+         bankn  TYPE bankn,  " Account number
+         bankl  TYPE bankl,  " Bank key (IFSC equivalent)
+       END OF ty_vendor_bank.
+
+DATA: lt_vendor_banks TYPE STANDARD TABLE OF ty_vendor_bank.
+
+*----------------------------------------------------------------------*
+*       CLASS lcl_event_handler DEFINITION
+*----------------------------------------------------------------------*
+CLASS lcl_event_handler DEFINITION.
+  PUBLIC SECTION.
+    METHODS:
+      handle_onf4 FOR EVENT onf4 OF cl_gui_alv_grid
+        IMPORTING e_fieldname es_row_no er_event_data.
+ENDCLASS.
+
+CLASS lcl_event_handler IMPLEMENTATION.
+  METHOD handle_onf4.
+    DATA: lt_f4_values TYPE TABLE OF ddshretval,
+          ls_f4_value  TYPE ddshretval.
+
+    " Get current vendor code
+    READ TABLE gt_alv_display INDEX es_row_no-row_id 
+      ASSIGNING FIELD-SYMBOL(<fs_current_row>).
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    " Filter bank accounts for current vendor
+    LOOP AT lt_vendor_banks INTO DATA(ls_bank) 
+         WHERE lifnr = <fs_current_row>-vend_code.
+      ls_f4_value-fieldval = ls_bank-bankn.
+      APPEND ls_f4_value TO lt_f4_values.
+    ENDLOOP.
+
+    " Show F4 help
+    CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+      EXPORTING
+        retfield        = 'BANKN'
+        value_org       = 'S'
+      TABLES
+        value_tab       = lt_f4_values
+      EXCEPTIONS
+        parameter_error = 1
+        no_values_found = 2
+        OTHERS          = 3.
+  ENDMETHOD.
+ENDCLASS.
+
+*----------------------------------------------------------------------*
+*       START-OF-SELECTION
+*----------------------------------------------------------------------*
+START-OF-SELECTION.
+  " Load vendor bank data (your existing logic)
+  LOOP AT it_bseg INTO wa_bseg.
+    SELECT lifnr, banks, bankl, bankn 
+      FROM lfbk 
+      INTO TABLE @DATA(lt_lfbk_temp)
+      WHERE lifnr = @wa_bseg-lifnr.
+    
+    " Transfer to our structured table
+    LOOP AT lt_lfbk_temp INTO DATA(ls_lfbk).
+      APPEND VALUE #( lifnr = ls_lfbk-lifnr
+                      bankn = ls_lfbk-bankn
+                      bankl = ls_lfbk-bankl ) TO lt_vendor_banks.
+    ENDLOOP.
+  ENDLOOP.
+
+  " Initialize ALV
+  CALL SCREEN 100.
+
+*----------------------------------------------------------------------*
+*       MODULE status_0100 OUTPUT
+*----------------------------------------------------------------------*
+MODULE status_0100 OUTPUT.
+  SET PF-STATUS 'STATUS_0100'.
+  
+  IF go_container IS INITIAL.
+    " Create container and ALV grid
+    CREATE OBJECT go_container
+      EXPORTING container_name = 'CUST_CONT'.
+      
+    CREATE OBJECT go_alv
+      EXPORTING i_parent = go_container.
+
+    " Register event handler
+    DATA(lo_event_handler) = NEW lcl_event_handler( ).
+    SET HANDLER lo_event_handler->handle_onf4 FOR go_alv.
+     
+              CLEAR gs_fcat.
+      gs_fcat-fieldname  = 'CHECKBOX'.
+      gs_fcat-coltext    = 'Select'.
+      gs_fcat-col_pos    = 0.
+      gs_fcat-checkbox   = 'X'.
+
+      APPEND gs_fcat TO gt_fcat.
+
+      CLEAR gs_fcat.
+      gs_fcat-fieldname  = 'STATUS'.
+      gs_fcat-coltext  = 'Extracted'.
+      gs_fcat-col_pos    = 1.
+      gs_fcat-outputlen  = 16.
+
+      APPEND gs_fcat TO gt_fcat.
+
+      CLEAR gs_fcat.
+      gs_fcat-fieldname  = 'REMARKS'.
+      gs_fcat-coltext  = 'Remarks'.
+      gs_fcat-col_pos    = 2.
+      gs_fcat-outputlen  = 20.
+      APPEND gs_fcat TO gt_fcat.
+
+      CLEAR gs_fcat.
+      gs_fcat-fieldname  = 'BELNR'.
+      gs_fcat-coltext  = 'Reference Number'.
+      gs_fcat-col_pos    = 3.
+      gs_fcat-outputlen  = 16.
+      APPEND gs_fcat TO gt_fcat.
+
+      CLEAR gs_fcat.
+      gs_fcat-fieldname  = 'DEBIT_ACC'.
+      gs_fcat-coltext = 'Debit Account'.
+      gs_fcat-col_pos    = 4.
+      gs_fcat-outputlen  = 16.
+      APPEND gs_fcat TO gt_fcat.
+
+      CLEAR gs_fcat.
+      gs_fcat-fieldname  = 'VEND_NAME'.
+      gs_fcat-coltext  = 'Vendor Name'.
+      gs_fcat-col_pos    = 5.
+      gs_fcat-outputlen  = 25.
+      APPEND gs_fcat TO gt_fcat.
+
+      CLEAR gs_fcat.
+      gs_fcat-fieldname  = 'VEND_CODE'.
+      gs_fcat-coltext  = 'Vendor Code'.
+      gs_fcat-col_pos    = 6.
+      gs_fcat-outputlen  = 15.
+      APPEND gs_fcat TO gt_fcat.
+
+      CLEAR gs_fcat.
+      gs_fcat-fieldname  = 'RWBTR'.
+      gs_fcat-coltext = 'Due Amount'.
+      gs_fcat-col_pos    = 7.
+      gs_fcat-outputlen  = 18.
+      APPEND gs_fcat TO gt_fcat.
+
+    " Build field catalog (your existing code remains)
+    CLEAR gs_fcat.
+    gs_fcat-fieldname = 'BENE_ACC'.
+    gs_fcat-coltext   = 'Beneficiary Account'.
+    gs_fcat-col_pos   = 8.
+    gs_fcat-outputlen = 25.
+    gs_fcat-f4availabl = 'X'.  " Enable F4 help
+    gs_fcat-edit      = 'X'.   " Make editable
+    APPEND gs_fcat TO gt_fcat.
+
+     CLEAR gs_fcat.
+    gs_fcat-fieldname  = 'BENE_IFSC'.
+    gs_fcat-coltext  = 'Beneficiary IFSC'.
+    gs_fcat-col_pos    = 9.
+    gs_fcat-outputlen  = 16.
+    APPEND gs_fcat TO gt_fcat.
+
+    CLEAR gs_fcat.
+    gs_fcat-fieldname  = 'BENE_ADD1'.
+    gs_fcat-coltext  = 'Beneficiary Address'.
+    gs_fcat-col_pos    = 10.
+    gs_fcat-outputlen  = 30.
+    APPEND gs_fcat TO gt_fcat.
+
+    CLEAR gs_fcat.
+    gs_fcat-fieldname  = 'PIN_CODE'.
+    gs_fcat-coltext  = 'Pin Code'.
+    gs_fcat-col_pos    = 11.
+    gs_fcat-outputlen  = 10.
+    APPEND gs_fcat TO gt_fcat.
+
+    CLEAR gs_fcat.
+    gs_fcat-fieldname  = 'NO_OF_INVOICES'.
+    gs_fcat-coltext  = 'No of Invoices'.
+    gs_fcat-col_pos    = 12.
+    gs_fcat-outputlen  = 10.
+    APPEND gs_fcat TO gt_fcat.
+
+
+    " Set layout
+    gs_layout-edit = 'X'.
+    gs_layout-sel_mode = 'D'.  " Allow row selection
+
+    " Display ALV
+    CALL METHOD go_alv->set_table_for_first_display
+      EXPORTING
+        is_layout       = gs_layout
+      CHANGING
+        it_outtab       = gt_alv_display
+        it_fieldcatalog = gt_fcat.
+  ENDIF.
+ENDMODULE.
