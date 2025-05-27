@@ -1,0 +1,140 @@
+*  &---------------------------------------------------------------------*
+*  & Report  YDROPALV
+*  &
+*  &---------------------------------------------------------------------*
+*  &
+*  &
+*  &---------------------------------------------------------------------*
+
+  REPORT YDROPALV.
+
+
+TABLES: yashtab.
+
+DATA: go_container     TYPE REF TO cl_gui_custom_container,
+      go_alv           TYPE REF TO cl_gui_alv_grid,
+      gt_data          TYPE STANDARD TABLE OF yashtab,
+      gs_data          TYPE yashtab,
+      gt_fcat          TYPE lvc_t_fcat,
+      gs_fcat          TYPE lvc_s_fcat,\
+      gt_dropdown_vals TYPE lvc_t_drop,
+      gs_dropdown_val  TYPE lvc_s_drop.
+
+TYPES: BEGIN OF ty_dropdown,
+         zutr_eft_no TYPE yashtab-zutr_eft_no,
+       END OF ty_dropdown.
+
+DATA: lt_dropdown TYPE STANDARD TABLE OF ty_dropdown,
+      ls_dropdown TYPE ty_dropdown.
+
+START-OF-SELECTION.
+
+  " Fetch ALV data
+  SELECT * FROM yashtab INTO TABLE gt_data UP TO 20 ROWS.
+
+  " Fetch dropdown data (DISTINCT values)
+  SELECT  zutr_eft_no FROM yashtab INTO TABLE lt_dropdown.
+
+  " Call screen
+  CALL SCREEN 100.
+
+* === PBO ===
+MODULE status_0100 OUTPUT.
+
+  SET PF-STATUS 'STATUS_0100'.
+
+  IF go_container IS INITIAL.
+
+    " Create container
+    CREATE OBJECT go_container
+      EXPORTING container_name = 'CUST_CONT'.
+
+    " Create ALV grid
+    CREATE OBJECT go_alv
+      EXPORTING i_parent = go_container.
+
+    " Build field catalog
+    CLEAR gs_fcat.
+    gs_fcat-fieldname = 'ZRUN_DATE'.
+    gs_fcat-coltext   = 'Run Date'.
+    APPEND gs_fcat TO gt_fcat.
+
+    CLEAR gs_fcat.
+    gs_fcat-fieldname = 'ZIDENT'.
+    gs_fcat-coltext   = 'Employee'.
+    APPEND gs_fcat TO gt_fcat.
+
+    CLEAR gs_fcat.
+    gs_fcat-fieldname = 'ZCLIENTCODE'.
+    gs_fcat-coltext   = 'Client Code'.
+    APPEND gs_fcat TO gt_fcat.
+
+    CLEAR gs_fcat.
+    gs_fcat-fieldname = 'ZUTR_EFT_NO'.
+    gs_fcat-coltext   = 'UTR/EFT Number'.
+    gs_fcat-edit      = 'X'.
+    gs_fcat-drdn_hndl = '1'.
+    APPEND gs_fcat TO gt_fcat.
+
+    CLEAR gs_fcat.
+    gs_fcat-fieldname = 'ZAMOUNT'.
+    gs_fcat-coltext   = 'Amount'.
+    APPEND gs_fcat TO gt_fcat.
+
+    " Fill dropdown structure from lt_dropdown
+    CLEAR gt_dropdown_vals.
+    LOOP AT lt_dropdown INTO ls_dropdown.
+      gs_dropdown_val-handle = '1'.
+      gs_dropdown_val-value  = ls_dropdown-zutr_eft_no.
+      APPEND gs_dropdown_val TO gt_dropdown_vals.
+    ENDLOOP.
+
+    " Assign dropdown to ALV
+    CALL METHOD go_alv->set_drop_down_table
+      EXPORTING it_drop_down = gt_dropdown_vals.
+
+    " Allow cell editing
+    CALL METHOD go_alv->register_edit_event
+      EXPORTING i_event_id = cl_gui_alv_grid=>mc_evt_modified.
+
+    " Display ALV
+    CALL METHOD go_alv->set_table_for_first_display
+      EXPORTING i_structure_name = 'YASHTAB'
+      CHANGING  it_outtab        = gt_data
+                it_fieldcatalog  = gt_fcat.
+
+  ENDIF.
+
+ENDMODULE.
+
+* === PAI ===
+MODULE user_command_0100 INPUT.
+
+  CASE sy-ucomm.
+
+    WHEN 'SAVE'.
+      CALL METHOD go_alv->check_changed_data.
+
+      LOOP AT gt_data INTO gs_data.
+        UPDATE yashtab SET
+          zutr_eft_no = gs_data-zutr_eft_no
+        WHERE zdocno = gs_data-zdocno.
+      ENDLOOP.
+
+      COMMIT WORK.
+      MESSAGE 'Data saved successfully.' TYPE 'S'.
+
+    WHEN 'BACK' OR 'EXIT' OR 'CANCEL'.
+      LEAVE PROGRAM.
+
+  ENDCASE.
+
+ENDMODULE.
+
+
+
+
+
+
+
+
